@@ -34,7 +34,11 @@ export default async function LoginPage() {
         </div>
         <p className="text-xs text-zinc-500">비밀번호는 저장하지 않습니다. 원장 세션은 암호화된 서버 저장소에만 보관됩니다.</p>
       </section>
-      <section className="flex items-center justify-center p-6 sm:p-12">
+      <section className="flex flex-col items-center justify-center gap-8 p-6 sm:p-12">
+        <div className="flex items-center gap-3 font-semibold lg:hidden">
+          <span className="grid size-10 place-items-center rounded-xl bg-zinc-950 text-white">M</span>
+          <div><p>모두출첵 베이스캠프</p><p className="text-xs font-normal text-muted-foreground">AI 학원 관리시스템</p></div>
+        </div>
         <Card className="w-full max-w-md border-zinc-200 shadow-xl shadow-zinc-200/40">
           <CardHeader>
             <CardTitle className="text-2xl">원장 로그인</CardTitle>

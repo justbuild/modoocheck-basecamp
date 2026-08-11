@@ -12,6 +12,7 @@ export function EnrollmentCodeCard() {
   const [expiresAt, setExpiresAt] = useState<number | null>(null);
   const [now, setNow] = useState(0);
   const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -21,7 +22,7 @@ export function EnrollmentCodeCard() {
   const remaining = expiresAt && now ? Math.max(0, Math.ceil((expiresAt - now) / 1000)) : 0;
 
   async function issue() {
-    setBusy(true); setError(null); setCode(null); setExpiresAt(null);
+    setBusy(true); setError(null); setCode(null); setExpiresAt(null); setCopyError(false);
     try {
       const response = await fetch("/api/agent/enrollment-code", { method: "POST" });
       const body = await response.json().catch(() => ({}));
@@ -37,9 +38,14 @@ export function EnrollmentCodeCard() {
 
   async function copy() {
     if (!code) return;
-    await navigator.clipboard.writeText(code);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1500);
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+      setCopyError(false);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setCopyError(true);
+    }
   }
 
   return (
@@ -51,7 +57,8 @@ export function EnrollmentCodeCard() {
       </CardContent>
       <CardFooter className="gap-2">
         <Button onClick={issue} disabled={busy}>{busy ? <LoaderCircle className="animate-spin" /> : <KeyRound />}{busy ? "발급 중…" : code ? "새 코드 발급" : "등록 코드 발급"}</Button>
-        {code && <Button variant="outline" onClick={copy}>{copied ? <Check /> : <Copy />}{copied ? "복사됨" : "복사"}</Button>}
+        {code && <Button variant="outline" onClick={copy} disabled={!remaining}>{copied ? <Check /> : <Copy />}{copied ? "복사됨" : "복사"}</Button>}
+        {copyError && <p className="text-xs text-destructive">자동 복사가 차단되었습니다. 코드를 직접 선택해 복사하세요.</p>}
       </CardFooter>
     </Card>
   );

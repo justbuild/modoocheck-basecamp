@@ -24,12 +24,23 @@ function readApproval(hash: string): ApprovalRequest | null {
   return request.requestId && request.locator && request.csrf && request.challenge && request.digest ? request : null;
 }
 
+const HASH_EVENT = "basecamp:hashchange";
+
 function subscribeHash(callback: () => void) {
   window.addEventListener("hashchange", callback);
-  return () => window.removeEventListener("hashchange", callback);
+  window.addEventListener(HASH_EVENT, callback);
+  return () => {
+    window.removeEventListener("hashchange", callback);
+    window.removeEventListener(HASH_EVENT, callback);
+  };
 }
 function getHash() { return window.location.hash; }
 function getServerHash() { return ""; }
+
+function clearHash() {
+  history.replaceState(null, "", `${location.pathname}${location.search}`);
+  window.dispatchEvent(new Event(HASH_EVENT));
+}
 
 export function ApprovalReview() {
   const hash = useSyncExternalStore(subscribeHash, getHash, getServerHash);
@@ -54,13 +65,18 @@ export function ApprovalReview() {
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error?.cause || "결정을 제출하지 못했습니다.");
       setResult(body.status);
-      history.replaceState(null, "", `${location.pathname}${location.search}`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "결정을 제출하지 못했습니다.");
     } finally { setBusy(null); }
   }
 
-  if (!request) return <Card><CardContent className="py-16 text-center"><CircleAlert className="mx-auto mb-4 size-9 text-muted-foreground" /><p className="font-medium">열린 승인 요청이 없습니다</p><p className="mt-2 text-sm text-muted-foreground">원장 알림 채널로 받은 승인 링크를 열면 요청 내용이 여기에 표시됩니다.</p></CardContent></Card>;
+  function close() {
+    clearHash();
+    setResult(null);
+    setError(null);
+  }
+
+  if (!request) return <Card><CardContent className="py-16 text-center"><CircleAlert className="mx-auto mb-4 size-9 text-muted-foreground" /><p className="font-medium">열린 승인 요청이 없습니다</p><p className="mt-2 text-sm text-muted-foreground">원장 알림 채널로 받은 승인 링크를 열으면 요청 내용이 여기에 표시됩니다.</p></CardContent></Card>;
 
   const remainingText = Number.isFinite(remaining) ? `${Math.max(0, Math.floor(remaining / 60000))}:${String(Math.max(0, Math.floor((remaining % 60000) / 1000))).padStart(2, "0")}` : "만료 시각 없음";
   return (
@@ -69,10 +85,16 @@ export function ApprovalReview() {
       {error && <Alert variant="destructive"><AlertTitle>제출 실패</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>}
       <Card>
         <CardHeader><div className="flex items-start justify-between gap-4"><div><CardTitle>변경 요청 검토</CardTitle><CardDescription className="mt-1">요청 내용과 부작용을 확인한 뒤 직접 결정하세요.</CardDescription></div><Badge variant={expired ? "destructive" : "secondary"}>{expired ? "만료됨" : `남은 시간 ${remainingText}`}</Badge></div></CardHeader>
-        <CardContent><dl className="grid gap-x-5 gap-y-4 text-sm sm:grid-cols-[140px_1fr]">{[["작업", request.operation], ["대상 수", request.targetCount], ["부작용", request.sideEffects], ["요청 ID", request.requestId], ["요청 digest", request.digest]].map(([term, value]) => <div key={term} className="contents"><dt className="text-muted-foreground">{term}</dt><dd className="break-all font-medium">{value}</dd></div>)}</dl></CardContent>
+        <CardContent><dl className="grid gap-x-5 gap-y-4 text-sm sm:grid-cols-[140px_1fr]">{[["작업", request.operation], ["대상 수", request.targetCount], ["부작용", request.sideEffects], ["요청 ID", request.requestId]].map(([term, value]) => <div key={term} className="contents"><dt className="text-muted-foreground">{term}</dt><dd className="break-all font-medium">{value}</dd></div>)}</dl></CardContent>
         <CardFooter className="gap-2 border-t pt-6">
-          <Button onClick={() => decide("APPROVE")} disabled={expired || !!busy || !!result}>{busy === "APPROVE" ? <LoaderCircle className="animate-spin" /> : <Check />}승인</Button>
-          <Button variant="destructive" onClick={() => decide("REJECT")} disabled={expired || !!busy || !!result}>{busy === "REJECT" ? <LoaderCircle className="animate-spin" /> : <X />}거절</Button>
+          {result || expired ? (
+            <Button variant="outline" onClick={close}>닫기</Button>
+          ) : (
+            <>
+              <Button onClick={() => decide("APPROVE")} disabled={!!busy}>{busy === "APPROVE" ? <LoaderCircle className="animate-spin" /> : <Check />}승인</Button>
+              <Button variant="destructive" onClick={() => decide("REJECT")} disabled={!!busy}>{busy === "REJECT" ? <LoaderCircle className="animate-spin" /> : <X />}거절</Button>
+            </>
+          )}
         </CardFooter>
       </Card>
     </div>
