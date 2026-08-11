@@ -40,14 +40,14 @@ export function LoginForm() {
     <form onSubmit={submit} className="space-y-5">
       <div className="space-y-2">
         <Label htmlFor="account">계정</Label>
-        <Input id="account" name="account" autoComplete="username" required autoFocus />
+        <Input id="account" name="account" autoComplete="username" required autoFocus className="h-11 px-3 text-base md:text-base" />
       </div>
       <div className="space-y-2">
         <Label htmlFor="password">비밀번호</Label>
-        <Input id="password" name="password" type="password" autoComplete="current-password" required />
+        <Input id="password" name="password" type="password" autoComplete="current-password" required className="h-11 px-3 text-base md:text-base" />
       </div>
       {error && <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>}
-      <Button type="submit" className="w-full" disabled={busy}>
+      <Button type="submit" className="h-11 w-full text-base" disabled={busy}>
         {busy ? <LoaderCircle className="animate-spin" /> : <LogIn />}
         {busy ? "로그인 중…" : "로그인"}
       </Button>

@@ -1,7 +1,8 @@
 import { Bot } from "lucide-react";
+import { ApprovalsLink } from "@/components/approvals-link";
 import { Separator } from "@/components/ui/separator";
-import { LogoutButton } from "@/components/logout-button";
 import { NavItems } from "@/components/nav-items";
+import { SettingsLink } from "@/components/settings-link";
 
 export function AppShell({ account, children }: { account: string; children: React.ReactNode }) {
   return (
@@ -12,14 +13,17 @@ export function AppShell({ account, children }: { account: string; children: Rea
           <div><p className="text-sm font-semibold">모두출첵 베이스캠프</p><p className="text-xs text-muted-foreground">AI 학원 관리시스템</p></div>
         </div>
         <Separator />
+        <div className="p-3 pb-0">
+          <ApprovalsLink />
+        </div>
         <NavItems />
         <div className="p-3 md:absolute md:inset-x-0 md:bottom-0">
           <Separator className="mb-3" />
-          <div className="mb-2 flex items-center gap-3 rounded-lg px-3 py-2">
-            <span className="grid size-8 place-items-center rounded-full bg-emerald-100 text-emerald-700"><Bot className="size-4" /></span>
-            <div className="min-w-0"><p className="truncate text-sm font-medium">{account}</p><p className="text-xs text-emerald-700">원장 세션 연결됨</p></div>
+          <div className="flex items-center gap-3 rounded-lg px-3 py-2">
+            <span className="grid size-8 shrink-0 place-items-center rounded-full bg-emerald-100 text-emerald-700"><Bot className="size-4" /></span>
+            <div className="min-w-0"><p className="truncate text-sm font-medium">{account}</p><p className="text-xs text-emerald-700">로그인됨</p></div>
+            <SettingsLink />
           </div>
-          <LogoutButton />
         </div>
       </aside>
       <main className="min-w-0 p-5 sm:p-8 lg:p-10"><div className="mx-auto max-w-5xl">{children}</div></main>

@@ -2,14 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CheckCheck, Home, KeyRound, Settings } from "lucide-react";
+import { Home } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navigation = [
   { href: "/dashboard", label: "대시보드", icon: Home },
-  { href: "/connect", label: "모두출첵 로그인", icon: KeyRound },
-  { href: "/approvals", label: "AI 작업 승인", icon: CheckCheck },
-  { href: "/settings", label: "설정", icon: Settings },
 ];
 
 export function NavItems() {
@@ -27,7 +24,7 @@ export function NavItems() {
             className={cn(
               "flex shrink-0 items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition",
               active
-                ? "bg-zinc-950 text-white shadow-sm"
+                ? "bg-zinc-100 text-zinc-950"
                 : "text-muted-foreground hover:bg-zinc-100 hover:text-zinc-950",
             )}
           >

@@ -17,14 +17,14 @@ export default async function LoginPage() {
         </div>
         <div className="max-w-xl space-y-7">
           <div className="space-y-3">
-            <p className="text-sm font-medium text-zinc-400">AI-NATIVE ACADEMY OS</p>
-            <h1 className="text-4xl font-semibold tracking-tight">학원장과 AI가 함께 만드는<br />자체 관리시스템의 출발점</h1>
-            <p className="text-zinc-400">모두출첵 Agent API와 안전하게 연결하고, 로컬 데이터와 업무 화면을 원하는 방식으로 확장하세요.</p>
+            <p className="text-sm font-medium text-zinc-400">우리 학원 맞춤 관리</p>
+            <h1 className="text-4xl font-semibold tracking-tight">학원장과 AI가 함께 만드는<br />우리 학원 관리시스템</h1>
+            <p className="text-zinc-400">모두출첵과 안전하게 연결하고, 우리 학원에 꼭 맞는 관리 화면을 만들어 가세요.</p>
           </div>
           <div className="grid grid-cols-2 gap-3 text-sm">
             {[
-              [ShieldCheck, "승인 기반 변경"], [Database, "자체 로컬 DB"],
-              [Bot, "AI 확장 구조"], [CheckCircle2, "감사 가능한 실행"],
+              [ShieldCheck, "원장 승인 후에만 변경"], [Database, "우리 학원 전용 데이터"],
+              [Bot, "AI 도우미와 함께"], [CheckCircle2, "모든 작업 기록 보관"],
             ].map(([Icon, label]) => (
               <div key={String(label)} className="flex items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900 p-4">
                 <Icon className="size-4 text-zinc-400" />{String(label)}
@@ -32,7 +32,7 @@ export default async function LoginPage() {
             ))}
           </div>
         </div>
-        <p className="text-xs text-zinc-500">비밀번호는 저장하지 않습니다. 원장 세션은 암호화된 서버 저장소에만 보관됩니다.</p>
+        <p className="text-xs text-zinc-500">비밀번호는 저장하지 않으며, 로그인 정보는 암호화되어 안전하게 보관됩니다.</p>
       </section>
       <section className="flex flex-col items-center justify-center gap-8 p-6 sm:p-12">
         <div className="flex items-center gap-3 font-semibold lg:hidden">

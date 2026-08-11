@@ -6,6 +6,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { setPendingApproval } from "@/lib/pending-approval";
 
 interface ApprovalRequest {
   requestId: string; locator: string; csrf: string; challenge: string; digest: string;
@@ -53,6 +54,11 @@ export function ApprovalReview() {
   useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, []);
   const remaining = useMemo(() => request?.expiresAt && now ? new Date(request.expiresAt).getTime() - now : Number.POSITIVE_INFINITY, [request, now]);
   const expired = remaining <= 0;
+
+  useEffect(() => {
+    setPendingApproval(request && !expired && !result ? request.requestId : null);
+    return () => setPendingApproval(null);
+  }, [request, expired, result]);
 
   async function decide(decision: "APPROVE" | "REJECT") {
     if (!request) return;
