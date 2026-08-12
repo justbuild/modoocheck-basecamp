@@ -45,7 +45,7 @@ npm run db:migrate
 npm run dev
 ```
 
-- Basecamp: http://localhost:3100
+- Basecamp: http://localhost (포트 80)
 - Agent API 기본 주소: http://localhost:4000 (Basecamp가 서버 측에서만 호출)
 
 세션 키 생성:
@@ -66,7 +66,7 @@ openssl rand -base64 32 | tr '+/' '-_' | tr -d '='
 
 | 명령 | 설명 |
 | --- | --- |
-| `npm run dev` | 개발 서버 (포트 3100) |
+| `npm run dev` | 개발 서버 (포트 80) |
 | `npm run db:generate` | 스키마 변경 후 migration 생성 |
 | `npm run db:migrate` | migration 적용 |
 | `npm run lint` | ESLint |
