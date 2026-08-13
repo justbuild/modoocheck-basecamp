@@ -39,14 +39,16 @@ Owner browser ──→ Basecamp BFF ──→ modoocheck5-agent-api ──→ m
 ## 시작하기
 
 ```bash
-cp .env.example .env.local   # BASECAMP_SESSION_KEY를 새 키로 교체
+cp .env.example .env.local   # 아래 두 값을 채워야 서버가 시작됩니다
 npm install
 npm run db:migrate
 npm run dev
 ```
 
 - Basecamp: http://localhost (포트 80)
-- Agent API 기본 주소: http://localhost:4000 (Basecamp가 서버 측에서만 호출)
+- Agent API 주소: `.env.local`의 `BASECAMP_AGENT_API_BASE` (Basecamp가 서버 측에서만 호출)
+
+URL 값은 하드코딩하지 않습니다. 전달받은 Agent API 문서 `GET {docs 주소}/v1/docs`의 `services.env_bootstrap.values`에 현재 환경의 URL이 들어 있으므로, 그 값을 `.env.local`에 그대로 채웁니다. 문서를 내려받은 호스트가 곧 현재 환경이라 운영/개발 설정을 나눌 필요가 없습니다.
 
 세션 키 생성:
 
@@ -58,7 +60,7 @@ openssl rand -base64 32 | tr '+/' '-_' | tr -d '='
 
 | 변수 | 설명 | 기본값 |
 | --- | --- | --- |
-| `BASECAMP_AGENT_API_BASE` | Basecamp 서버가 호출할 modoocheck5-agent-api 주소 | `http://localhost:4000` |
+| `BASECAMP_AGENT_API_BASE` | Basecamp 서버가 호출할 modoocheck5-agent-api 주소. 전달받은 `/v1/docs`의 `services.env_bootstrap.values`에서 채움 (필수) | — |
 | `BASECAMP_SESSION_KEY` | 세션 암호화용 32바이트 base64url 키 (필수 교체) | — |
 | `DATABASE_FILENAME` | Basecamp 자체 SQLite 파일명 (Core DB와 분리) | `basecamp.db` |
 
