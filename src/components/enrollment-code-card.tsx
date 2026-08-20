@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Check, Copy, KeyRound, LoaderCircle } from "lucide-react";
+import { Check, Copy, ExternalLink, KeyRound, LoaderCircle, Sparkles } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 
+const SUBSCRIPTION_URL = process.env.NEXT_PUBLIC_BASECAMP_SUBSCRIPTION_URL || "https://modoocheck.com";
 export function EnrollmentCodeCard() {
   const [busy, setBusy] = useState(false);
   const [code, setCode] = useState<string | null>(null);
@@ -14,6 +15,8 @@ export function EnrollmentCodeCard() {
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [resolution, setResolution] = useState<string | null>(null);
+  const [subscriptionRequired, setSubscriptionRequired] = useState(false);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -22,17 +25,26 @@ export function EnrollmentCodeCard() {
   const remaining = expiresAt && now ? Math.max(0, Math.ceil((expiresAt - now) / 1000)) : 0;
 
   async function issue() {
-    setBusy(true); setError(null); setCode(null); setExpiresAt(null); setCopyError(false);
+    setBusy(true); setError(null); setResolution(null); setSubscriptionRequired(false);
+    setCode(null); setExpiresAt(null); setCopyError(false);
     try {
       const response = await fetch("/api/agent/enrollment-code", { method: "POST" });
       const body = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(body.error?.cause || "등록 코드를 발급하지 못했습니다.");
+      if (!response.ok) {
+        if (body.error?.code === "SUBSCRIPTION_REQUIRED") {
+          setSubscriptionRequired(true);
+          return;
+        }
+        setError(body.error?.cause || "등록 코드를 발급하지 못했습니다.");
+        setResolution(body.error?.resolution || null);
+        return;
+      }
       setCode(body.enrollment_code);
       const issuedAt = Date.now();
       setNow(issuedAt);
       setExpiresAt(issuedAt + body.expires_in * 1000);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "등록 코드를 발급하지 못했습니다.");
+    } catch {
+      setError("등록 코드를 발급하지 못했습니다.");
     } finally { setBusy(false); }
   }
 
@@ -52,7 +64,22 @@ export function EnrollmentCodeCard() {
     <Card>
       <CardHeader><CardTitle className="flex items-center gap-2"><KeyRound className="size-5" />AI 에이전트 등록</CardTitle><CardDescription>코드는 일회용이며 5분 뒤 만료됩니다. AI 대화창에만 전달하세요.</CardDescription></CardHeader>
       <CardContent className="space-y-4">
-        {error && <Alert variant="destructive"><AlertTitle>발급 실패</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>}
+        {subscriptionRequired && (
+          <div className="space-y-4 rounded-xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/60 dark:bg-amber-950/30">
+            <div className="flex items-start gap-3">
+              <span className="grid size-9 shrink-0 place-items-center rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-300"><Sparkles className="size-4" /></span>
+              <div className="space-y-1">
+                <p className="font-medium text-zinc-950 dark:text-zinc-50">AI 연결은 구독 중인 원장님께만 제공돼요</p>
+                <p className="text-sm text-muted-foreground">모두출첵을 구독하시면 AI 도우미가 출결 확인, 원비 안내 같은 반복 업무를 대신 도와드려요. 구독 후 이 화면에서 코드를 다시 발급받으면 바로 연결됩니다.</p>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 pl-12">
+              <a href={SUBSCRIPTION_URL} target="_blank" rel="noreferrer" className={buttonVariants({ size: "sm" })}>모두출첵 구독하러 가기<ExternalLink /></a>
+              <Button variant="ghost" size="sm" onClick={issue} disabled={busy}>구독을 마쳤어요, 다시 발급</Button>
+            </div>
+          </div>
+        )}
+        {error && <Alert variant="destructive"><AlertTitle>발급 실패</AlertTitle><AlertDescription className="whitespace-pre-line">{[error, resolution].filter(Boolean).join("\n")}</AlertDescription></Alert>}
         {code && <Alert><AlertTitle className="flex items-center justify-between">등록 코드 <span className="font-mono text-xs text-muted-foreground">{remaining ? `${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, "0")}` : "만료됨"}</span></AlertTitle><AlertDescription><code className="mt-3 block break-all rounded-lg bg-zinc-950 p-4 font-mono text-xs leading-relaxed text-zinc-100">{code}</code></AlertDescription></Alert>}
       </CardContent>
       <CardFooter className="gap-2">
