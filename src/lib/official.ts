@@ -1,20 +1,13 @@
 import "server-only";
 
-import { desc, eq, inArray } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "@/db";
-import { officialRequests, officialSnapshots } from "@/db/schema";
-import {
-  changeRequestStatus,
-  createChangeRequest,
-  dispatchChangeRequest,
-  type ExecutionStatus,
-} from "./agent-api";
-import { delegatedAccessToken } from "./delegated";
-import { extractResultData, officialOperation, type OfficialOperationId } from "./official-catalog";
+import { officialSnapshots } from "@/db/schema";
+import { officialOperation, resolveOperationPath, type OfficialOperationId } from "./official-catalog";
 import { audit, type OwnerSession } from "./session";
-
-const TERMINAL_STATUSES = new Set(["REJECTED", "EXPIRED", "EXECUTED", "FAILED", "UNKNOWN"]);
+import { callUpstream } from "./upstream";
 
 const requestInputSchema = z.object({
   params: z.record(z.string(), z.unknown()).optional(),
@@ -23,61 +16,45 @@ const requestInputSchema = z.object({
 });
 export type OfficialRequestInput = z.infer<typeof requestInputSchema>;
 
-export type OfficialRequestView = {
-  requestId: string;
+export type OfficialRunView = {
+  executionId: string;
   operation: string;
   kind: "READ" | "WRITE";
-  status: string;
-  notification?: "SENT" | "FAILED";
-  nextAction: string | null;
-  expiresAt: string;
-  errorCause?: string;
+  status: "EXECUTED";
+  /** 스냅샷 없이 바로 화면에 쓰는 조회(예: 학생 상세)의 응답 데이터. */
+  data?: unknown;
 };
 
-/** 공식 데이터 요청 생성: 위임 토큰으로 change request를 만들고 로컬에 추적 기록을 남긴다. */
-export async function startOfficialRequest(
+/**
+ * 원장이 Basecamp 화면에서 직접 실행하는 공식 데이터 작업.
+ * 원장 본인의 조작이므로 승인 절차 없이 원장 세션 토큰으로 upstream을 바로 부른다.
+ * 조회(READ)는 결과를 화면 표시용 스냅샷으로 저장한다.
+ * 실패는 UpstreamApiError로 던져지고 BFF가 오류 응답으로 변환한다.
+ */
+export async function runOfficialOperation(
   session: OwnerSession,
   operationId: OfficialOperationId,
   input: OfficialRequestInput,
-): Promise<OfficialRequestView> {
+): Promise<OfficialRunView> {
   const operation = officialOperation(operationId);
   const request = requestInputSchema.parse(input);
-  const token = await delegatedAccessToken(session);
-  const created = await createChangeRequest(token, operationId, request);
-  const now = new Date();
-  getDb().insert(officialRequests).values({
-    requestId: created.request_id,
-    operation: operationId,
-    kind: operation.kind,
-    payloadJson: JSON.stringify(request),
-    status: created.status,
-    expiresAt: new Date(created.expires_at),
-    createdAt: now,
-    updatedAt: now,
-  }).run();
-  audit("OFFICIAL_REQUEST_CREATED", session.account, created.request_id, {
-    operation: operationId,
-    kind: operation.kind,
-    notification: created.notification,
+  const executionId = randomUUID();
+  const data = await callUpstream(session.ownerToken, {
+    method: operation.method,
+    path: resolveOperationPath(operation.path, request.params),
+    query: request.query as Record<string, unknown> | undefined,
+    body: request.body as Record<string, unknown> | undefined,
   });
-  return {
-    requestId: created.request_id,
+  if (operation.kind === "READ" && operation.snapshotKey) {
+    saveSnapshot(operation.snapshotKey, executionId, data);
+  }
+  audit("OFFICIAL_DIRECT_EXECUTED", session.account, executionId, {
     operation: operationId,
     kind: operation.kind,
-    status: created.status,
-    notification: created.notification,
-    nextAction: null,
-    expiresAt: created.expires_at,
-  };
-}
-
-function persistStatus(requestId: string, status: ExecutionStatus) {
-  getDb().update(officialRequests).set({
-    status: status.status,
-    resultJson: status.result ? JSON.stringify(status.result) : null,
-    nextAction: status.next_action ?? null,
-    updatedAt: new Date(),
-  }).where(eq(officialRequests.requestId, requestId)).run();
+  });
+  const view: OfficialRunView = { executionId, operation: operationId, kind: operation.kind, status: "EXECUTED" };
+  if (operation.kind === "READ" && !operation.snapshotKey) view.data = data;
+  return view;
 }
 
 function saveSnapshot(key: string, requestId: string, data: unknown) {
@@ -88,66 +65,15 @@ function saveSnapshot(key: string, requestId: string, data: unknown) {
     .run();
 }
 
-/**
- * 요청 상태를 한 단계 전진시킨다.
- * REQUESTED → (원장 승인 대기), APPROVED → 1회 dispatch, EXECUTED(조회) → 스냅샷 저장.
- * UNKNOWN은 terminal이며 절대 재실행하지 않는다.
- */
-export async function advanceOfficialRequest(session: OwnerSession, requestId: string): Promise<OfficialRequestView> {
-  const row = getDb().select().from(officialRequests).where(eq(officialRequests.requestId, requestId)).get();
-  if (!row) throw new Error("추적 중인 공식 데이터 요청이 아닙니다.");
-  if (TERMINAL_STATUSES.has(row.status)) return toView(row);
-
-  const operation = officialOperation(row.operation as OfficialOperationId);
-  const token = await delegatedAccessToken(session);
-  let status = await changeRequestStatus(token, requestId);
-  if (status.status === "APPROVED") {
-    status = await dispatchChangeRequest(token, requestId);
-    audit("OFFICIAL_REQUEST_DISPATCHED", session.account, requestId, {
-      operation: row.operation,
-      status: status.status,
-    });
-  }
-  persistStatus(requestId, status);
-  if (status.status === "EXECUTED" && operation.kind === "READ" && operation.snapshotKey) {
-    saveSnapshot(operation.snapshotKey, requestId, extractResultData(status.result));
-  }
-  const updated = getDb().select().from(officialRequests).where(eq(officialRequests.requestId, requestId)).get();
-  return toView(updated!);
-}
-
-function toView(row: typeof officialRequests.$inferSelect): OfficialRequestView {
-  let result: { category?: string; body?: { error?: string | null } } | undefined;
-  try {
-    result = row.resultJson ? JSON.parse(row.resultJson) : undefined;
-  } catch {
-    result = undefined;
-  }
-  return {
-    requestId: row.requestId,
-    operation: row.operation,
-    kind: row.kind as "READ" | "WRITE",
-    status: row.status,
-    nextAction: row.nextAction,
-    expiresAt: row.expiresAt.toISOString(),
-    errorCause: row.status === "FAILED" && result?.body?.error ? String(result.body.error) : undefined,
-  };
-}
-
-/** 화면 표시용: 아직 끝나지 않은 요청 목록. */
-export function pendingOfficialRequests(operations: string[]): OfficialRequestView[] {
-  if (operations.length === 0) return [];
-  const rows = getDb().select().from(officialRequests)
-    .where(inArray(officialRequests.operation, operations))
-    .orderBy(desc(officialRequests.createdAt))
-    .all();
-  return rows
-    .filter((row) => !TERMINAL_STATUSES.has(row.status) && row.expiresAt.getTime() > Date.now() - 60_000)
-    .map((row) => toView(row));
-}
-
 export function readSnapshot(key: string) {
   const row = getDb().select().from(officialSnapshots).where(eq(officialSnapshots.key, key)).get();
   if (!row) return null;
   return { data: JSON.parse(row.dataJson) as unknown, fetchedAt: row.fetchedAt, requestId: row.requestId };
+}
+
+/** 스냅샷이 maxAgeMs 안에 가져온 것이면 true. 렌더 함수의 순수성 규칙을 피하려고 여기 둔다. */
+export function isSnapshotFresh(key: string, maxAgeMs: number): boolean {
+  const row = getDb().select({ fetchedAt: officialSnapshots.fetchedAt })
+    .from(officialSnapshots).where(eq(officialSnapshots.key, key)).get();
+  return row !== undefined && Date.now() - row.fetchedAt.getTime() < maxAgeMs;
 }

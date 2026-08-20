@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { apiError, unauthorized } from "@/lib/http";
 import { isOfficialOperation, officialOperation } from "@/lib/official-catalog";
-import { startOfficialRequest } from "@/lib/official";
+import { runOfficialOperation } from "@/lib/official";
 import { currentOwnerSession } from "@/lib/session";
 
 const bodySchema = z.object({
@@ -10,6 +10,10 @@ const bodySchema = z.object({
   request: z.unknown().optional(),
 });
 
+/**
+ * 원장이 화면에서 직접 실행하는 공식 데이터 작업(조회/변경).
+ * 원장 본인의 조작이므로 승인 없이 upstream을 바로 호출하고 결과를 돌려준다.
+ */
 export async function POST(request: Request) {
   try {
     const session = await currentOwnerSession();
@@ -25,8 +29,8 @@ export async function POST(request: Request) {
       }, { status: 403 });
     }
     const input = officialOperation(body.operation).input.parse(body.request ?? {});
-    const view = await startOfficialRequest(session, body.operation, input);
-    return NextResponse.json(view, { status: 202 });
+    const view = await runOfficialOperation(session, body.operation, input);
+    return NextResponse.json(view, { status: 200 });
   } catch (error) {
     return apiError(error);
   }

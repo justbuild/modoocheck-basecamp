@@ -5,10 +5,11 @@ import { apiError, unauthorized } from "@/lib/http";
 import { audit, currentOwnerSession } from "@/lib/session";
 
 const inputSchema = z.object({
-  locator: z.string().min(1),
-  csrf: z.string().min(1),
   challenge: z.string().min(1),
   digest: z.string().min(1),
+  operationId: z.string().min(1),
+  targetCount: z.number().int().nonnegative(),
+  expiresAt: z.string().min(1),
   decision: z.enum(["APPROVE", "REJECT"]),
 });
 

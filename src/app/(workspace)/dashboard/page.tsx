@@ -1,10 +1,14 @@
 import Link from "next/link";
 import { eq } from "drizzle-orm";
-import { ArrowRight, Bot, CheckCheck, KeyRound } from "lucide-react";
+import { ArrowRight, Bot, Sparkles } from "lucide-react";
 import { getDb } from "@/db";
 import { localAudit } from "@/db/schema";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { agentHealth } from "@/lib/agent-api";
+import { StudentTrendChart } from "@/components/student-trend-chart";
+import { buildMonthlyTrend, type MonthlyCount } from "@/lib/student-trend";
+import { seoulToday } from "@/lib/dates";
+import { currentOwnerSession } from "@/lib/session";
+import { callUpstream } from "@/lib/upstream";
 
 export const metadata = { title: "대시보드" };
 
@@ -15,8 +19,6 @@ const onboardingSteps = [
 ];
 
 export default async function DashboardPage() {
-  const health = await agentHealth().catch(() => null);
-  const ready = health?.upstream.ready === true;
   const hasIssuedCode = getDb()
     .select({ id: localAudit.id })
     .from(localAudit)
@@ -24,9 +26,23 @@ export default async function DashboardPage() {
     .limit(1)
     .get() !== undefined;
 
+  const session = await currentOwnerSession();
+  let trend: MonthlyCount[] | null = null;
+  if (session) {
+    try {
+      const data = await callUpstream(session.ownerToken, {
+        method: "GET",
+        path: "/service/students/view/plain",
+      });
+      trend = buildMonthlyTrend(data, seoulToday(), 12);
+    } catch {
+      trend = null;
+    }
+  }
+
   return (
     <div className="space-y-8">
-      <header><p className="text-sm font-medium text-muted-foreground">BASECAMP OVERVIEW</p><h1 className="mt-1 text-3xl font-semibold tracking-tight">대시보드</h1><p className="mt-2 text-muted-foreground">모두출첵 연결 상태를 확인하고 자주 쓰는 기능으로 이동하세요.</p></header>
+      <header><p className="text-sm font-medium text-muted-foreground">BASECAMP OVERVIEW</p><h1 className="mt-1 text-3xl font-semibold tracking-tight">대시보드</h1><p className="mt-2 text-muted-foreground">우리 학원 현황을 한눈에 확인하세요.</p></header>
       {!hasIssuedCode && (
         <Card className="overflow-hidden border-amber-200/60 bg-gradient-to-br from-amber-50 via-white to-white">
           <CardContent className="space-y-6 py-2">
@@ -56,35 +72,32 @@ export default async function DashboardPage() {
           </CardContent>
         </Card>
       )}
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>모두출첵 연결</CardDescription>
-            <CardTitle className="flex items-center gap-2.5 text-lg">
-              <span className="relative flex size-2.5">
-                {ready && <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-75" />}
-                <span className={`relative inline-flex size-2.5 rounded-full ${ready ? "bg-emerald-500" : "bg-amber-500"}`} />
-              </span>
-              {ready ? "정상 연결" : "확인 필요"}
-            </CardTitle>
-          </CardHeader>
-          <CardContent><p className="text-xs text-muted-foreground">{ready ? "지금 바로 사용할 수 있어요" : "잠시 후 다시 확인해 주세요"}</p></CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>우리 학원 데이터</CardDescription>
-            <CardTitle className="flex items-center gap-2.5 text-lg">
-              <span className="relative flex size-2.5"><span className="relative inline-flex size-2.5 rounded-full bg-emerald-500" /></span>
-              안전하게 보관 중
-            </CardTitle>
-          </CardHeader>
-          <CardContent><p className="text-xs text-muted-foreground">학원 데이터는 이 컴퓨터에만 저장됩니다.</p></CardContent>
-        </Card>
-      </div>
-      <div className="grid gap-4 md:grid-cols-2">
-        <Link href="/settings/connect" className="group"><Card className="h-full transition hover:-translate-y-0.5 hover:shadow-md"><CardHeader><KeyRound className="size-5" /><CardTitle className="flex items-center justify-between">AI 에이전트 등록 <ArrowRight className="size-4 transition group-hover:translate-x-1" /></CardTitle><CardDescription>AI 도우미에게 전달할 일회용 연결 코드를 발급합니다.</CardDescription></CardHeader></Card></Link>
-        <Link href="/approvals" className="group"><Card className="h-full transition hover:-translate-y-0.5 hover:shadow-md"><CardHeader><CheckCheck className="size-5" /><CardTitle className="flex items-center justify-between">AI 작업 승인 <ArrowRight className="size-4 transition group-hover:translate-x-1" /></CardTitle><CardDescription>AI가 요청한 중요한 작업을 확인하고 승인 여부를 결정합니다.</CardDescription></CardHeader></Card></Link>
-      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">월간 학생 수 추이</CardTitle>
+          <CardDescription>최근 12개월 동안 시스템에 등록된 학생 수입니다.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {trend ? (
+            <StudentTrendChart trend={trend} />
+          ) : (
+            <p className="py-16 text-center text-sm text-muted-foreground">학생 데이터를 불러오지 못했습니다. 잠시 후 다시 확인해 주세요.</p>
+          )}
+        </CardContent>
+      </Card>
+      <Card className="border-dashed">
+        <CardContent className="flex items-start gap-4 py-6">
+          <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-zinc-950 text-white">
+            <Sparkles className="size-5" />
+          </span>
+          <div>
+            <p className="text-base font-semibold">원하는 대시보드를 AI에게 요청해 보세요</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              “이번 달 신규 등록 학생 수를 보여줘”, “그룹별 출석률을 비교해줘”처럼 말하면 AI가 이 화면에 새로운 지표를 만들어 줍니다.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

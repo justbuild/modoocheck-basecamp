@@ -27,7 +27,8 @@ export function LoginForm() {
       });
       const body = await response.json().catch(() => ({}));
       form.querySelector<HTMLInputElement>("[name=password]")!.value = "";
-      if (!response.ok) throw new Error(body.error?.cause || "로그인하지 못했습니다.");
+      // cause(무엇이 잘못됐는지) + resolution(어떻게 하면 되는지)을 함께 보여준다.
+      if (!response.ok) throw new Error([body.error?.cause || "로그인하지 못했습니다.", body.error?.resolution].filter(Boolean).join("\n"));
       router.replace("/dashboard");
       router.refresh();
     } catch (cause) {
@@ -46,7 +47,7 @@ export function LoginForm() {
         <Label htmlFor="password">비밀번호</Label>
         <Input id="password" name="password" type="password" autoComplete="current-password" required className="h-11 px-3 text-base md:text-base" />
       </div>
-      {error && <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>}
+      {error && <Alert variant="destructive"><AlertDescription className="whitespace-pre-line">{error}</AlertDescription></Alert>}
       <Button type="submit" className="h-11 w-full text-base" disabled={busy}>
         {busy ? <LoaderCircle className="animate-spin" /> : <LogIn />}
         {busy ? "로그인 중…" : "로그인"}

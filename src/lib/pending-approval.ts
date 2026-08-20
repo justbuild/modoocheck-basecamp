@@ -1,34 +1,81 @@
 "use client";
 
-import { useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-/**
- * 현재 앱 화면에 열린 미결정 승인 요청을 표시하는 인메모리 신호.
- * 승인 비밀값(locator/csrf/challenge)은 클라이언트 상태에 저장할 수 없으므로
- * 요청 ID만 다루고, 페이지를 벗어나면 자동으로 해제된다.
- */
-const PENDING_EVENT = "basecamp:pending-approval";
-let pendingRequestId: string | null = null;
+export type PendingApprovalItem = {
+  request_id: string;
+  operation_id: string;
+  target_count: number;
+  side_effects: string[];
+  challenge: string;
+  request_digest: string;
+  expires_at: string;
+  created_at: string;
+};
 
-export function setPendingApproval(requestId: string | null) {
-  if (pendingRequestId === requestId) return;
-  pendingRequestId = requestId;
-  window.dispatchEvent(new Event(PENDING_EVENT));
-}
+type PendingApprovalsResponse = {
+  approvals: PendingApprovalItem[];
+};
 
-function subscribe(callback: () => void) {
-  window.addEventListener(PENDING_EVENT, callback);
-  return () => window.removeEventListener(PENDING_EVENT, callback);
-}
+export type PendingApprovalsConnectionError = {
+  cause: string;
+  resolution?: string;
+};
 
-function getSnapshot() {
-  return pendingRequestId;
-}
+export function usePendingApprovals(intervalMs = 30000) {
+  const [approvals, setApprovals] = useState<PendingApprovalItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [connectionError, setConnectionError] = useState<PendingApprovalsConnectionError | null>(null);
+  const mounted = useRef(false);
+  const latestRequest = useRef(0);
 
-function getServerSnapshot() {
-  return null;
-}
+  // loading은 첫 조회 완료 시점에만 내려간다. 백그라운드 재조회는 기존 목록을 그대로 유지한다.
+  // 조회 실패는 "요청 없음"과 구분해 connectionError로 알린다. 서버가 죽었는데 '요청 없음'으로 보이면 안 된다.
+  const refresh = useCallback(async () => {
+    const request = ++latestRequest.current;
+    try {
+      const response = await fetch("/api/approvals", { cache: "no-store" });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null) as { error?: { cause?: string; resolution?: string } } | null;
+        if (mounted.current && request === latestRequest.current) {
+          setApprovals([]);
+          setConnectionError({
+            cause: body?.error?.cause || "승인 요청 목록을 불러오지 못했습니다.",
+            resolution: body?.error?.resolution,
+          });
+        }
+        return;
+      }
+      const body = (await response.json()) as PendingApprovalsResponse;
+      if (mounted.current && request === latestRequest.current) {
+        setApprovals(Array.isArray(body.approvals) ? body.approvals : []);
+        setConnectionError(null);
+      }
+    } catch {
+      if (mounted.current && request === latestRequest.current) {
+        setApprovals([]);
+        setConnectionError({
+          cause: "서버에 연결하지 못했습니다.",
+          resolution: "인터넷 연결을 확인하고 잠시 후 다시 시도해 주세요.",
+        });
+      }
+    } finally {
+      if (mounted.current && request === latestRequest.current) setLoading(false);
+    }
+  }, []);
 
-export function usePendingApproval() {
-  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  useEffect(() => {
+    mounted.current = true;
+    const tick = () => void refresh();
+    const initial = window.setTimeout(tick, 0);
+    const timer = window.setInterval(tick, intervalMs);
+    return () => {
+      mounted.current = false;
+      latestRequest.current += 1;
+      window.clearTimeout(initial);
+      window.clearInterval(timer);
+    };
+  }, [intervalMs, refresh]);
+
+  return { approvals, refresh, loading, connectionError };
 }

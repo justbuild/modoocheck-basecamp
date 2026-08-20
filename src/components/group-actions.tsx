@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { OfficialStatusLine } from "@/components/official-status-line";
 import { useOfficialRequest } from "@/components/use-official-request";
 
-/** 그룹 한 개의 이름 변경/삭제. 두 작업 모두 원장 승인 후 실행된다. */
+/** 그룹 한 개의 이름 변경/삭제. 원장 본인의 조작이므로 바로 실행된다. */
 export function GroupActions({ groupId, name }: { groupId: string; name: string }) {
   const { state, run, busy, reset } = useOfficialRequest();
   const [mode, setMode] = useState<"idle" | "rename" | "delete">("idle");
@@ -42,14 +42,14 @@ export function GroupActions({ groupId, name }: { groupId: string; name: string 
       {mode === "rename" && (
         <form onSubmit={rename} className="flex items-center justify-end gap-2">
           <Input value={nextName} onChange={(event) => setNextName(event.target.value)} maxLength={100} className="h-8 max-w-48" disabled={busy} />
-          <Button type="submit" size="sm" disabled={busy}>변경 요청</Button>
+          <Button type="submit" size="sm" disabled={busy}>이름 변경</Button>
           <Button type="button" variant="ghost" size="sm" onClick={close} disabled={busy} aria-label="취소"><X /></Button>
         </form>
       )}
       {mode === "delete" && (
         <div className="flex items-center justify-end gap-2 text-sm">
           <span className="text-muted-foreground">그룹을 삭제하면 학생과 그룹의 연결도 함께 정리됩니다.</span>
-          <Button variant="destructive" size="sm" onClick={remove} disabled={busy}>삭제 요청</Button>
+          <Button variant="destructive" size="sm" onClick={remove} disabled={busy}>삭제</Button>
           <Button variant="ghost" size="sm" onClick={close} disabled={busy} aria-label="취소"><X /></Button>
         </div>
       )}

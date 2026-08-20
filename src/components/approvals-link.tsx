@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { ShieldCheck } from "lucide-react";
-import { usePendingApproval } from "@/lib/pending-approval";
+import { usePendingApprovals } from "@/lib/pending-approval";
 
 export function ApprovalsLink() {
-  const pending = usePendingApproval();
+  const { approvals } = usePendingApprovals(30000);
+  const pending = approvals.length > 0;
 
   return (
     <Link

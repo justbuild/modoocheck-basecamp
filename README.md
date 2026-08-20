@@ -64,6 +64,7 @@ openssl rand -base64 32 | tr '+/' '-_' | tr -d '='
 | `BASECAMP_AGENT_API_BASE` | Basecamp 서버가 호출할 modoocheck5-agent-api 주소. 전달받은 `/v1/docs`의 `services.env_bootstrap.values`에서 채움 (필수) | — |
 | `BASECAMP_SESSION_KEY` | 세션 암호화용 32바이트 base64url 키 (필수 교체) | — |
 | `DATABASE_FILENAME` | Basecamp 자체 SQLite 파일명 (Core DB와 분리) | `basecamp.db` |
+| `NEXT_PUBLIC_BASECAMP_SUBSCRIPTION_URL` | 비구독 원장에게 보여줄 모두출첵 구독 페이지 주소 (브라우저 번들에 포함됨) | `https://modoocheck.com` |
 
 ## 스크립트
 
@@ -82,38 +83,40 @@ openssl rand -base64 32 | tr '+/' '-_' | tr -d '='
 ```text
 src/
 ├── app/
-│   ├── (workspace)/        # 로그인 후 화면 (대시보드 · 로그인 연결 · 승인 · 설정)
+│   ├── (workspace)/        # 로그인 후 화면 (대시보드 · 학생관리 · 승인 · 설정)
 │   ├── api/                # BFF 라우트 (세션, enrollment code, 승인 결정, 헬스)
 │   └── login/              # 원장 로그인
 ├── components/             # shadcn/ui 기반 화면 컴포넌트
 ├── db/                     # Drizzle 스키마, 연결, migration 실행기
 └── lib/
-    ├── agent-api.ts        # Agent API typed client (Zod 검증) — 유일한 외부 호출 지점
-    ├── delegated.ts        # Basecamp 자신의 위임 자격(가족) 등록·access token 관리
+    ├── agent-api.ts        # Agent API typed client (Zod 검증) — AI 위임 작업 전용
+    ├── upstream.ts         # 모두출첵 Core 직접 호출 클라이언트 (원장 세션 토큰, Zod 검증)
     ├── official-catalog.ts # 화면이 쓸 수 있는 공식 작업 허용 목록 + 입력/스냅샷 스키마
-    ├── official.ts         # 공식 데이터 요청 파이프라인(생성 → 승인 대기 → 1회 실행 → 스냅샷)
-    ├── session.ts          # 원장 세션 생성/검증/폐기
+    ├── official.ts         # 공식 작업 실행 파이프라인(원장 직접 실행 → 조회 스냅샷 저장)
+    ├── session.ts          # 원장 세션 생성/검증/폐기 + 로컬 감사
     └── crypto.ts           # AES-256-GCM 암호화
 ```
 
 ## 학생관리 · 그룹관리 동작 방식
 
-Agent API에는 원장용 데이터 조회 endpoint가 없습니다. 그래서 Basecamp는 자기 자신을 하나의
-위임 클라이언트(가족)로 등록하고, 조회를 포함한 **모든 공식 데이터 접근을 change-request 계약
-(요청 → 원장 승인 → 1회 dispatch)** 그대로 수행합니다.
+공식 데이터 접근 경로는 누가 조작하느냐에 따라 둘로 나뉩니다.
 
-1. 화면에서 "동기화"나 "승인 요청 보내기"를 누르면 Basecamp가 위임 토큰으로 요청을 만듭니다.
-2. 원장은 모두출첵 알림으로 받은 승인 링크(`/approvals#…`)에서 요청을 검토하고 승인합니다.
-3. Basecamp가 승인된 요청을 정확히 한 번 실행하고, 조회 결과는 표시용 스냅샷으로 저장합니다.
-4. 스냅샷은 캐시일 뿐이며 진실의 원천은 항상 모두출첵 Core입니다. `UNKNOWN` 상태는 재시도하지 않습니다.
+- **원장이 화면에서 직접 조작** — 원장 본인의 행동이므로 승인 절차가 없습니다. Basecamp가
+  원장 세션 토큰으로 모두출첵 Core를 바로 호출합니다 (`src/lib/official.ts` → `upstream.ts`).
+  조회 결과는 표시용 스냅샷으로 저장됩니다.
+- **AI 위임 클라이언트(enrollment code로 등록된 외부 에이전트)의 작업** — Agent API의
+  요청 생성 → 원장 승인(<AI 작업 승인>, `/approvals`) → 1회 실행 계약을 반드시 거칩니다.
+
+스냅샷은 캐시일 뿐이며 진실의 원천은 항상 모두출첵 Core입니다. 오래됐으면 화면에서 다시
+동기화하면 됩니다.
 
 ## 확장 규칙
 
 1. 자체 데이터는 `src/db/schema.ts`에 추가하고 `npm run db:generate`로 migration을 만듭니다.
 2. 공식 모두출첵 데이터를 Basecamp DB에 복제해 진실의 원천으로 만들지 않습니다.
 3. 브라우저 컴포넌트에서 Agent API나 upstream을 직접 호출하지 않습니다.
-4. 외부 호출은 `src/lib/agent-api.ts`의 typed client를 통해 Server Component 또는 Route Handler에서 수행합니다.
-5. 비밀값은 로그·클라이언트 상태·URL query에 남기지 않습니다. 승인 비밀값은 원장 통지의 URL fragment로만 전달합니다.
+4. 외부 호출은 `src/lib/upstream.ts`(원장 직접 조작)와 `src/lib/agent-api.ts`(AI 위임 작업) 두 typed client를 통해서만, Server Component 또는 Route Handler에서 수행합니다.
+5. 비밀값은 로그·클라이언트 상태·URL에 남기지 않습니다. 승인 검토 데이터는 세션 인증된 Route Handler(`/api/approvals`)를 통해서만 조회합니다.
 
 ## 검증
 
@@ -122,3 +125,33 @@ npm run ci
 ```
 
 CI는 ESLint, TypeScript, Vitest, production build를 모두 실행합니다.
+
+## Codex 같은 AI 코딩 도구로 개발하기
+
+이 프로젝트는 원장님이 AI 코딩 도구(Codex, Claude Code 등)와 함께 기능을 얹어 나가는 것을
+전제로 만들어졌습니다. 저장소 최상위의 `AGENTS.md`에 AI가 지켜야 할 아키텍처 경계, 보안 규칙,
+확장 레시피가 들어 있고, Codex는 이 파일을 자동으로 읽습니다.
+
+시작 순서:
+
+```bash
+git clone <이 저장소 주소>
+cd modoocheck-basecamp
+cp .env.example .env.local   # 위 "환경 변수" 표대로 값 채우기
+npm install
+npm run db:migrate
+codex                        # 프로젝트 폴더 안에서 실행
+```
+
+요청은 "무엇을 하고 싶은지"를 일상 언어로 말하면 됩니다. 기술 용어를 몰라도 괜찮습니다.
+
+> - "학생마다 상담 기록을 남기고 싶어. 날짜, 상담 내용, 후속 조치를 적을 수 있게 해줘."
+> - "학생 목록에서 한 달 넘게 출석이 없는 학생만 골라 보는 필터를 만들어줘."
+> - "대시보드에 이번 주 출석률 그래프를 넣어줘."
+
+주의할 점:
+
+- AI가 "공식 데이터를 Basecamp DB에 복사해 두겠다"고 하면 거절하세요. 학생·출결·원비·공지의
+  진실의 원천은 항상 모두출첵 Core입니다.
+- 작업이 끝나면 AI에게 `npm run ci`를 통과했는지 확인하세요. 통과 전에는 완료가 아닙니다.
+- 기능이 하나 완성될 때마다 커밋해 두면 언제든 되돌릴 수 있습니다.

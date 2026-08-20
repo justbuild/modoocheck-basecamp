@@ -12,6 +12,14 @@ const problemSchema = z.object({
   success: z.number().optional(),
 });
 
+// upstream(modoocheck5-api) 오류 봉투: { success: 0, error: "메시지", error_code? }
+// owner 프록시가 upstream 상태·본문을 그대로 전달하므로 이 형태도 해석해야 한다 (예: SUBSCRIPTION_REQUIRED).
+const upstreamProblemSchema = z.object({
+  success: z.number().optional(),
+  error: z.string().min(1),
+  error_code: z.string().optional(),
+});
+
 const ownerLoginSchema = z.object({
   success: z.number(),
   data: z.union([z.string(), z.object({ token: z.string().min(1) })]).optional(),
@@ -23,53 +31,49 @@ const enrollmentSchema = z.object({
   expires_in: z.number().int().positive(),
 });
 
-const assertionSchema = z.object({ owner_assertion: z.string().min(1) });
+const assertionSchema = z.object({
+  assertion: z.string().min(1),
+  expires_in: z.number().int().positive().optional(),
+});
 const decisionSchema = z.object({
   request_id: z.string(),
   status: z.enum(["APPROVED", "REJECTED"]),
 });
-const fixedScopeSchema = z.string().min(1);
-const enrollmentResultSchema = z.object({
-  family_id: z.string().min(1),
-  family_secret: z.string().min(1),
-  access_token: z.string().min(1),
-  access_expires_at: z.string().min(1),
-  scopes: z.array(fixedScopeSchema),
+const pendingApprovalsSchema = z.object({
+  approvals: z.array(z.object({
+    request_id: z.string().min(1),
+    operation_id: z.string().min(1),
+    target_count: z.number().int().nonnegative(),
+    side_effects: z.array(z.string()),
+    challenge: z.string().min(1),
+    request_digest: z.string().min(1),
+    expires_at: z.string().min(1),
+    created_at: z.string().min(1),
+  })),
 });
-const authResultSchema = z.object({
-  family_id: z.string().min(1),
-  access_token: z.string().min(1),
-  access_expires_at: z.string().min(1),
-  scopes: z.array(fixedScopeSchema),
-});
-const requestedOperationSchema = z.object({
-  request_id: z.string().min(1),
-  operation: z.string(),
-  status: z.literal("REQUESTED"),
-  target_count: z.number().int().nonnegative(),
-  side_effects: z.array(z.string()),
-  approval_digest: z.string(),
-  expires_at: z.string().min(1),
-  notification: z.enum(["SENT", "FAILED"]),
-});
-const executionStatusSchema = z.object({
-  request_id: z.string().min(1),
-  execution_id: z.string().optional(),
-  operation: z.string(),
-  status: z.enum(["REQUESTED", "REJECTED", "EXPIRED", "APPROVED", "EXECUTED", "FAILED", "UNKNOWN"]),
-  correlation_id: z.string().optional(),
-  deadline_at: z.string().optional(),
-  result: z.record(z.string(), z.unknown()).optional(),
-  evidence: z.record(z.string(), z.unknown()).optional(),
-  next_action: z.string().optional(),
-});
-export type ExecutionStatus = z.infer<typeof executionStatusSchema>;
-export type RequestedOperation = z.infer<typeof requestedOperationSchema>;
+export type PendingApproval = z.infer<typeof pendingApprovalsSchema>["approvals"][number];
 
 const healthSchema = z.object({
   status: z.string(),
   upstream: z.object({ connected: z.boolean(), ready: z.boolean(), status: z.number().nullable() }),
 });
+
+// agent-api가 upstream(모두출첵 본체 서버) 장애를 알려오는 코드들.
+// 기술 메시지(영문) 대신 사용자가 이해할 수 있는 안내로 바꿔 보여준다. 코드는 그대로 유지한다.
+const UPSTREAM_OUTAGE_GUIDE: Record<string, { cause: string; resolution: string }> = {
+  UPSTREAM_UNAVAILABLE: {
+    cause: "모두출첵 서버가 응답하지 않아 요청을 마치지 못했습니다.",
+    resolution: "모두출첵 서버가 일시적으로 불안정할 수 있어요. 1~2분 뒤 다시 시도하고, 계속되면 모두출첵 고객센터에 문의해 주세요.",
+  },
+  UPSTREAM_MALFORMED: {
+    cause: "모두출첵 서버가 올바르지 않은 응답을 보냈습니다.",
+    resolution: "잠시 후 다시 시도해 주세요. 계속되면 모두출첵 서버 점검이 필요할 수 있으니 모두출첵 고객센터에 알려 주세요.",
+  },
+  UPSTREAM_AUTH_UNAVAILABLE: {
+    cause: "모두출첵 서버와의 인증 연결이 완료되지 않았습니다.",
+    resolution: "모두출첵 서버가 일시적으로 불안정할 수 있어요. 1~2분 뒤 다시 시도하고, 계속되면 모두출첵 고객센터에 문의해 주세요.",
+  },
+};
 
 export class AgentApiError extends Error {
   constructor(
@@ -84,21 +88,44 @@ export class AgentApiError extends Error {
 }
 
 async function request(path: string, init: RequestInit = {}) {
-  const response = await fetch(`${runtimeConfig().agentApiBase}${path}`, {
-    ...init,
-    cache: "no-store",
-    headers: { accept: "application/json", ...init.headers },
-    signal: AbortSignal.timeout(10_000),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${runtimeConfig().agentApiBase}${path}`, {
+      ...init,
+      cache: "no-store",
+      headers: { accept: "application/json", ...init.headers },
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch (cause) {
+    // agent-api 자체가 꺼졌거나(연결 거부) 응답이 없는(시간 초과) 경우.
+    const timedOut = cause instanceof Error && (cause.name === "TimeoutError" || cause.name === "AbortError");
+    throw new AgentApiError(
+      timedOut
+        ? "AI 에이전트 서버가 응답하지 않습니다. (10초 초과)"
+        : "AI 에이전트 서버에 연결하지 못했습니다.",
+      timedOut ? 504 : 503,
+      timedOut ? "AGENT_API_TIMEOUT" : "AGENT_API_UNREACHABLE",
+      "일시적인 서비스 장애일 수 있어요. 잠시 후 다시 시도하고, 계속되면 모두출첵 고객센터에 문의해 주세요.",
+    );
+  }
   const body: unknown = await response.json().catch(() => null);
   if (!response.ok) {
     const problem = problemSchema.safeParse(body);
-    throw new AgentApiError(
-      problem.success ? problem.data.error?.cause || `Agent API returned HTTP ${response.status}.` : `Agent API returned HTTP ${response.status}.`,
-      response.status,
-      problem.success ? problem.data.error?.code || "AGENT_API_ERROR" : "AGENT_API_ERROR",
-      problem.success ? problem.data.error?.resolution : undefined,
-    );
+    if (problem.success && problem.data.error) {
+      const code = problem.data.error.code || "AGENT_API_ERROR";
+      const guide = UPSTREAM_OUTAGE_GUIDE[code];
+      throw new AgentApiError(
+        guide?.cause || problem.data.error.cause || `Agent API returned HTTP ${response.status}.`,
+        response.status,
+        code,
+        guide?.resolution || problem.data.error.resolution,
+      );
+    }
+    const upstreamProblem = upstreamProblemSchema.safeParse(body);
+    if (upstreamProblem.success) {
+      throw new AgentApiError(upstreamProblem.data.error, response.status, upstreamProblem.data.error_code || "AGENT_API_ERROR");
+    }
+    throw new AgentApiError(`Agent API returned HTTP ${response.status}.`, response.status, "AGENT_API_ERROR");
   }
   return body;
 }
@@ -125,71 +152,40 @@ export async function issueEnrollmentCode(ownerToken: string) {
 
 export async function decideApproval(ownerToken: string, input: {
   requestId: string;
-  locator: string;
-  csrf: string;
   challenge: string;
   digest: string;
+  operationId: string;
+  targetCount: number;
+  expiresAt: string;
   decision: "APPROVE" | "REJECT";
 }) {
   const assertion = assertionSchema.parse(await request("/v1/owner/approval-assertions", {
     method: "POST",
     headers: { "content-type": "application/json", "x-access-token": ownerToken },
     body: JSON.stringify({
-      audience: "modoocheck5-agent-api",
+      request_id: input.requestId,
       challenge: input.challenge,
       request_digest: input.digest,
+      operation_id: input.operationId,
+      target_count: input.targetCount,
+      expires_at: input.expiresAt,
     }),
   }));
   return decisionSchema.parse(await request(`/v1/changes/approvals/${encodeURIComponent(input.requestId)}/decision`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      locator: input.locator,
-      csrf: input.csrf,
-      owner_assertion: assertion.owner_assertion,
+      owner_assertion: assertion.assertion,
       decision: input.decision,
     }),
   }));
 }
 
-export async function enrollDelegatedFamily(enrollmentCode: string) {
-  return enrollmentResultSchema.parse(await request("/v1/auth/enroll", {
+export async function listPendingApprovals(ownerToken: string) {
+  return pendingApprovalsSchema.parse(await request("/v1/owner/pending-approvals", {
     method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ enrollment_code: enrollmentCode }),
-  }));
-}
-
-export async function refreshDelegatedFamily(familyId: string, familySecret: string) {
-  return authResultSchema.parse(await request("/v1/auth/refresh", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ family_id: familyId, family_secret: familySecret }),
-  }));
-}
-
-export async function createChangeRequest(accessToken: string, operation: string, requestInput: {
-  params?: Record<string, unknown>;
-  query?: Record<string, unknown>;
-  body?: Record<string, unknown>;
-}) {
-  return requestedOperationSchema.parse(await request("/v1/changes/requests", {
-    method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${accessToken}` },
-    body: JSON.stringify({ operation, request: requestInput }),
-  }));
-}
-
-export async function changeRequestStatus(accessToken: string, requestId: string) {
-  return executionStatusSchema.parse(await request(`/v1/changes/requests/${encodeURIComponent(requestId)}`, {
-    headers: { authorization: `Bearer ${accessToken}` },
-  }));
-}
-
-export async function dispatchChangeRequest(accessToken: string, requestId: string) {
-  return executionStatusSchema.parse(await request(`/v1/changes/requests/${encodeURIComponent(requestId)}/dispatch`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${accessToken}` },
+    headers: { "content-type": "application/json", "x-access-token": ownerToken },
+    body: JSON.stringify({}),
   }));
 }
 

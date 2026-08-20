@@ -2,13 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { GraduationCap, Home, Users } from "lucide-react";
+import { GraduationCap, Home } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navigation = [
   { href: "/dashboard", label: "대시보드", icon: Home },
   { href: "/students", label: "학생관리", icon: GraduationCap },
-  { href: "/groups", label: "그룹관리", icon: Users },
 ];
 
 export function NavItems() {
