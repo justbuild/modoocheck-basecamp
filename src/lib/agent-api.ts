@@ -28,6 +28,44 @@ const decisionSchema = z.object({
   request_id: z.string(),
   status: z.enum(["APPROVED", "REJECTED"]),
 });
+const fixedScopeSchema = z.string().min(1);
+const enrollmentResultSchema = z.object({
+  family_id: z.string().min(1),
+  family_secret: z.string().min(1),
+  access_token: z.string().min(1),
+  access_expires_at: z.string().min(1),
+  scopes: z.array(fixedScopeSchema),
+});
+const authResultSchema = z.object({
+  family_id: z.string().min(1),
+  access_token: z.string().min(1),
+  access_expires_at: z.string().min(1),
+  scopes: z.array(fixedScopeSchema),
+});
+const requestedOperationSchema = z.object({
+  request_id: z.string().min(1),
+  operation: z.string(),
+  status: z.literal("REQUESTED"),
+  target_count: z.number().int().nonnegative(),
+  side_effects: z.array(z.string()),
+  approval_digest: z.string(),
+  expires_at: z.string().min(1),
+  notification: z.enum(["SENT", "FAILED"]),
+});
+const executionStatusSchema = z.object({
+  request_id: z.string().min(1),
+  execution_id: z.string().optional(),
+  operation: z.string(),
+  status: z.enum(["REQUESTED", "REJECTED", "EXPIRED", "APPROVED", "EXECUTED", "FAILED", "UNKNOWN"]),
+  correlation_id: z.string().optional(),
+  deadline_at: z.string().optional(),
+  result: z.record(z.string(), z.unknown()).optional(),
+  evidence: z.record(z.string(), z.unknown()).optional(),
+  next_action: z.string().optional(),
+});
+export type ExecutionStatus = z.infer<typeof executionStatusSchema>;
+export type RequestedOperation = z.infer<typeof requestedOperationSchema>;
+
 const healthSchema = z.object({
   status: z.string(),
   upstream: z.object({ connected: z.boolean(), ready: z.boolean(), status: z.number().nullable() }),
@@ -111,6 +149,47 @@ export async function decideApproval(ownerToken: string, input: {
       owner_assertion: assertion.owner_assertion,
       decision: input.decision,
     }),
+  }));
+}
+
+export async function enrollDelegatedFamily(enrollmentCode: string) {
+  return enrollmentResultSchema.parse(await request("/v1/auth/enroll", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ enrollment_code: enrollmentCode }),
+  }));
+}
+
+export async function refreshDelegatedFamily(familyId: string, familySecret: string) {
+  return authResultSchema.parse(await request("/v1/auth/refresh", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ family_id: familyId, family_secret: familySecret }),
+  }));
+}
+
+export async function createChangeRequest(accessToken: string, operation: string, requestInput: {
+  params?: Record<string, unknown>;
+  query?: Record<string, unknown>;
+  body?: Record<string, unknown>;
+}) {
+  return requestedOperationSchema.parse(await request("/v1/changes/requests", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ operation, request: requestInput }),
+  }));
+}
+
+export async function changeRequestStatus(accessToken: string, requestId: string) {
+  return executionStatusSchema.parse(await request(`/v1/changes/requests/${encodeURIComponent(requestId)}`, {
+    headers: { authorization: `Bearer ${accessToken}` },
+  }));
+}
+
+export async function dispatchChangeRequest(accessToken: string, requestId: string) {
+  return executionStatusSchema.parse(await request(`/v1/changes/requests/${encodeURIComponent(requestId)}/dispatch`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${accessToken}` },
   }));
 }
 

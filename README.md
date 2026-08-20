@@ -34,6 +34,7 @@ Owner browser ──→ Basecamp BFF ──→ modoocheck5-agent-api ──→ m
 - **원클릭 결정** — owner assertion 발급과 APPROVE/REJECT를 하나의 BFF 요청으로 처리
 - **로컬 감사 기록** — 비밀값을 제외한 Basecamp 자체 활동 로그
 - **연결 상태 대시보드** — Agent API / 로컬 DB / 보안 경계 상태
+- **학생관리 / 그룹관리** — 공식 학생·그룹 목록을 승인 기반으로 동기화해 보여주고, 학생 등록·그룹 생성/이름 변경/삭제를 요청 → 원장 승인 → 1회 실행 계약 그대로 수행
 - SQLite + Drizzle migration, shadcn/ui 기반 반응형 백오피스
 
 ## 시작하기
@@ -88,9 +89,23 @@ src/
 ├── db/                     # Drizzle 스키마, 연결, migration 실행기
 └── lib/
     ├── agent-api.ts        # Agent API typed client (Zod 검증) — 유일한 외부 호출 지점
+    ├── delegated.ts        # Basecamp 자신의 위임 자격(가족) 등록·access token 관리
+    ├── official-catalog.ts # 화면이 쓸 수 있는 공식 작업 허용 목록 + 입력/스냅샷 스키마
+    ├── official.ts         # 공식 데이터 요청 파이프라인(생성 → 승인 대기 → 1회 실행 → 스냅샷)
     ├── session.ts          # 원장 세션 생성/검증/폐기
     └── crypto.ts           # AES-256-GCM 암호화
 ```
+
+## 학생관리 · 그룹관리 동작 방식
+
+Agent API에는 원장용 데이터 조회 endpoint가 없습니다. 그래서 Basecamp는 자기 자신을 하나의
+위임 클라이언트(가족)로 등록하고, 조회를 포함한 **모든 공식 데이터 접근을 change-request 계약
+(요청 → 원장 승인 → 1회 dispatch)** 그대로 수행합니다.
+
+1. 화면에서 "동기화"나 "승인 요청 보내기"를 누르면 Basecamp가 위임 토큰으로 요청을 만듭니다.
+2. 원장은 모두출첵 알림으로 받은 승인 링크(`/approvals#…`)에서 요청을 검토하고 승인합니다.
+3. Basecamp가 승인된 요청을 정확히 한 번 실행하고, 조회 결과는 표시용 스냅샷으로 저장합니다.
+4. 스냅샷은 캐시일 뿐이며 진실의 원천은 항상 모두출첵 Core입니다. `UNKNOWN` 상태는 재시도하지 않습니다.
 
 ## 확장 규칙
 
