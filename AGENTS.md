@@ -22,7 +22,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 ```text
 원장 브라우저 ──→ Basecamp BFF(/api/*) ──┬→ 모두출첵 Core (원장 직접 조작, upstream.ts)
-                                          └→ modoocheck5-agent-api (AI 위임 작업, agent-api.ts)
+                                          └→ modoocheck5-agent-api (AI 작업·위임 작업, agent-api.ts)
                         │
                         └──→ Basecamp SQLite (세션 / 자체 데이터 / 스냅샷 / 로컬 감사)
 ```
@@ -39,6 +39,8 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
      upstream을 바로 호출 (`src/lib/official.ts` → `upstream.ts`).
    - AI 위임 클라이언트(enrollment code로 등록된 외부 에이전트)의 작업 → Agent API의
      요청 생성 → 원장 승인 → 1회 실행 계약을 반드시 거친다.
+   - 원장이 Basecamp에서 직접 요청한 범용 LLM 작업 → 원장 세션 토큰으로 Agent API의
+     `/v1/ai/jobs`를 호출한다. 이 경로는 위임 토큰이나 위임 승인 절차를 사용하지 않는다.
 4. **공식 데이터를 복제해 진실의 원천으로 만들지 않는다.** 학생·출결·원비·공지를 Basecamp DB에
    따로 저장해 관리하는 테이블을 만들지 않는다. `official_snapshots`는 표시용 캐시일 뿐이다.
 5. **비밀값을 남기지 않는다.** 원장 비밀번호, 원장 토큰 원문, enrollment code, locator, CSRF,
@@ -59,7 +61,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 | `src/lib/official-catalog.ts` | 화면이 쓸 수 있는 공식 작업 허용 목록 + 입력/스냅샷 스키마 |
 | `src/lib/official.ts` | 공식 작업 실행 파이프라인 (원장 직접 실행 + 조회 스냅샷 저장) |
 | `src/lib/upstream.ts` | 모두출첵 Core 직접 호출 클라이언트 (원장 세션 토큰) |
-| `src/lib/agent-api.ts` | Agent API typed client (AI 위임 작업 전용) |
+| `src/lib/agent-api.ts` | Agent API typed client (원장용 LLM 작업 + AI 위임 작업) |
 | `src/lib/session.ts` | 원장 세션 생성/검증/폐기 + 로컬 감사(`audit`) |
 | `src/lib/crypto.ts` | AES-256-GCM 암호화 |
 
@@ -93,6 +95,85 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 4. 화면은 `/api/official/requests` 등 기존 BFF 경로를 통해 실행한다.
 5. 조회 스냅샷은 캐시다. 오래됐으면 다시 동기화하면 되고, 알 수 없는 상태(`UNKNOWN`)를
    자동 재시도하지 않는다.
+
+## 원장용 범용 LLM API
+
+### 어떤 용도인가
+
+Agent API는 원장이 모두출첵 API 키나 LLM 제공사의 API 키를 직접 관리하지 않고도 AI 기능을
+사용할 수 있도록 범용 비동기 LLM 작업 기능을 제공한다. 플랫폼 서버만 OpenRouter 키를
+보관하며, Basecamp와 브라우저에는 키·제공사 내부 정보·실제 모델 ID를 노출하지 않는다.
+
+이 기능은 다음과 같이 처리가 오래 걸리거나 이미지가 필요한 AI 기능의 기반으로 사용한다.
+
+- 문서·상담 내용 요약 및 분류
+- 안내문·보고서 초안 생성
+- 구조화된 JSON 결과 생성
+- 사진이나 스캔 이미지를 포함한 분석
+- 추후 별도 명세로 추가할 답안지 채점 등의 학원 업무 자동화
+
+Agent API는 학원 업무에 사용할 프롬프트를 대신 결정하지 않는다. 프롬프트와 결과 해석 규칙은
+Basecamp 기능이 관리한다. 자동 채점·과금 정책·플랜별 사용 한도는 범용 API 자체와 분리된
+후속 기능이다.
+
+### 제공 대상과 비용 안내
+
+- 현재는 **활성 상태인 모두출첵 구독자에게 무료로 제공**한다.
+- 현재 버전도 작업별 입력·출력 토큰 사용량을 기록한다.
+- 무료 제공은 영구 보장 조건이 아니다. 실제 사용량과 운영 비용에 따라 추후 별도 요금,
+  사용량 기반 과금, 플랜별 한도 또는 초과 사용 제한이 적용될 수 있다.
+- 사용자 화면에 이 기능을 노출할 때는 현재 무료 제공 대상과 향후 비용이 발생할 수 있다는
+  내용을 숨기지 말고 쉽게 안내한다.
+- 향후 과금 정책이 추가되더라도 Basecamp가 LLM API 키를 보관하거나 직접 비용을 계산하지
+  않는다. 플랫폼이 기록한 사용량과 서버 정책을 진실의 원천으로 사용한다.
+
+### 공개 API
+
+| API | 역할 |
+| --- | --- |
+| `POST /v1/ai/jobs` | AI 작업을 접수하고 `{ job_id }`를 받는다 |
+| `GET /v1/ai/jobs/:id/events` | SSE로 queued/running/완료 상태와 heartbeat를 받는다 |
+| `GET /v1/ai/jobs/:id` | 연결이 끊겼을 때 상태를 복구하거나 최종 결과를 조회한다 |
+
+모델은 외부에 실제 모델명을 노출하지 않고 `standard` 또는 `vision` tier로 요청한다.
+현재 플랫폼은 OpenRouter를 통해 여러 제공사의 모델을 교체·시험할 수 있지만, Basecamp 코드는
+특정 제공사나 모델 ID에 의존하면 안 된다.
+
+### Basecamp에서 사용하는 순서
+
+1. 브라우저는 Basecamp의 `/api/*` Route Handler만 호출한다.
+2. Route Handler는 Basecamp 세션을 검증하고 복호화한 원장 세션 토큰을 서버 안에서만 사용한다.
+3. `src/lib/agent-api.ts`가 원장 토큰을 `x-access-token` 헤더로 넣어
+   `POST /v1/ai/jobs`를 호출한다.
+4. 요청에는 기능이 관리하는 `purpose`, `model_tier`, `messages`를 넣는다. 결과 형식이 정해져
+   있으면 지원 범위 안의 `output_schema`를 함께 보낸다.
+5. 화면은 Basecamp BFF를 통해 SSE 상태를 중계받는다. 브라우저가 Agent API에 직접 연결하면
+   안 된다.
+6. SSE 연결이 끊기거나 페이지를 다시 열었으면 `GET /v1/ai/jobs/:id`로 상태를 복구한다.
+7. 완료 결과는 기능별 Zod 스키마로 다시 검증한 뒤 화면에 사용한다.
+
+### 요청 규칙
+
+- `standard` tier에는 이미지를 보내지 않는다.
+- 이미지가 필요하면 `vision` tier를 사용한다.
+- 이미지는 장당 최대 5MiB, 최대 4장, 전체 최대 15MiB다.
+- 전체 POST 본문은 25MiB를 넘지 않는다.
+- 한 원장은 동시에 최대 10개의 활성 작업을 가질 수 있다.
+- 요청은 원장당 분당 60회로 제한된다.
+- 구조화된 결과의 `output_schema`는 객체 루트, 명시적인 `required`,
+  `additionalProperties: false`를 사용하는 제한된 비재귀 JSON Schema만 허용한다.
+
+### 반드시 지킬 보안 경계
+
+- OpenRouter 키나 다른 LLM 제공사 키를 Basecamp 환경변수·DB·브라우저·로그에 복사하지 않는다.
+- 위임용 Bearer 토큰으로 `/v1/ai/jobs`를 호출하지 않는다. 이 API는 원장 세션 토큰 전용이다.
+- 원장 토큰, 프롬프트의 민감 정보, 이미지 원문을 URL이나 로그에 남기지 않는다.
+- Agent API 응답에서 제공사명이나 모델 ID를 추측해 화면 계약으로 만들지 않는다.
+- SSE를 유일한 상태 저장소로 취급하지 않는다. 작업 DB가 진실의 원천이므로 연결이 끊기면
+  GET 조회로 복구한다.
+- `429`를 받으면 `Retry-After`를 따르고, 무제한 자동 재시도를 만들지 않는다.
+- 실패 결과의 `error.code`, `cause`, `resolution`은 사용자에게 쉬운 말로 안내하되 내부 오류나
+  원본 제공사 응답을 추가로 노출하지 않는다.
 
 ## 검증
 
